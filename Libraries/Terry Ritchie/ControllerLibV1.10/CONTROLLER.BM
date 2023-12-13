@@ -1,0 +1,1559 @@
+'----------------------------
+' Controller Library V1.10
+' Terry Ritchie
+' May 17th, 2023
+' Written using QB64PE v3.7.0
+'----------------------------
+' CONTROLLER.BM
+'----------------------------
+'
+' TODO: Add WHEEL routines
+'       Create PDF instructions
+'
+'----------------------------
+' 04/10/23 V1.0  - Initial Release
+' 04/26/23 V1.01 - Corrected slot reassigning issues
+' 05/17/23 V1.10 - Added __MAKE_BUTTON, __CONNECTED, __SAVE_BUTTONS, __LOAD_BUTTONS, __NEW_CONTROLLER, __REMOVE_CONTROLLER
+'                - The library now has the ability to save and load controller user defined button configurations
+'                - You can now detect when a controller has been plugged in or unplugged
+'                - A controller's user defined button assignments can be removed when the controller has been unplugged
+'----------------------------
+
+
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __REMOVE_CONTROLLER (cid AS INTEGER) '                                                                                  __REMOVE_CONTROLLER |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Removes all user defined buttons associated with a controller.                                                                                |
+    '|                                                                                                                                               |
+    '| __REMOVE_CONTROLLER __JOYPAD3CID                                                                                                              |
+    '|                                                                                                                                               |
+    '| cid - the controller id                                                                                                                       |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+    SHARED CL_BUTTON() AS TYPE__BUTTON '         need access to button array
+    DIM b AS INTEGER '                           button counter
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__REMOVE_CONTROLLER"
+    IF cid < 1 OR cid > 6 THEN __ERROR "Invalid controller id."
+    IF CL_CONTROLLER(cid).Found = 0 THEN __ERROR "The specified controller does not exist."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+-----------------------------------------------------------------------------+
+    '| Cycle through each assigned button slot. If a button assignment matches the |
+    '| controller name and controller id then remove the button from the array.    |
+    '+-----------------------------------------------------------------------------+
+
+    b = 0 '                                                                                           reset button counter
+    DO '                                                                                              begin button search
+        b = b + 1 '                                                                                   increment button counter
+        IF CL_BUTTON(b).Slot1.Cname = CL_CONTROLLER(cid).Name AND CL_BUTTON(b).Slot1.cid = cid THEN ' does controller name and id match in slot 1?
+            __REMOVE_BUTTON b, 1 '                                                                    yes, remove the button assignment in slot 1
+        END IF
+        IF CL_BUTTON(b).Slot2.Cname = CL_CONTROLLER(cid).Name AND CL_BUTTON(b).Slot2.cid = cid THEN ' does controller name and id match in slot 2?
+            __REMOVE_BUTTON b, 2
+        END IF
+        IF CL_BUTTON(b).Slot3.Cname = CL_CONTROLLER(cid).Name AND CL_BUTTON(b).Slot3.cid = cid THEN ' does controller name and id match in slot 3?
+            __REMOVE_BUTTON b, 3
+        END IF
+        IF CL_BUTTON(b).Slot4.Cname = CL_CONTROLLER(cid).Name AND CL_BUTTON(b).Slot4.cid = cid THEN ' does controller name and id match in slot 4?
+            __REMOVE_BUTTON b, 4
+        END IF
+    LOOP UNTIL b = UBOUND(CL_BUTTON) '                                                                leave when all buttons checked
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __NEW_CONTROLLER (Action AS INTEGER) '                                                                                __NEW_CONTROLLER |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Checks for the addition of a new controller, a controller that has been unplugged, or a controller plugged back in.                           |
+    '|                                                                                                                                               |
+    '| Controller = __NEW_CONTROLLER(Action)                                                                                                         |
+    '|                                                                                                                                               |
+    '| Action - the returned action that occurred                                                                                                    |
+    '|      0 - nothing changed                                                                                                                      |
+    '|      1 - a controller was unplugged           (the constant __UNPLUGGED     has been created to check for this)                               |
+    '|      2 - a controller was plugged back in     (the constant __PLUGGEDIN     has been created to check for this)                               |
+    '|      3 - a new controller has been plugged in (the constant __NEWCONTROLLER has been created to check for this)                               |
+    '|                                                                                                                                               |
+    '| The function will return the following values:                                                                                                |
+    '|                                                                                                                                               |
+    '|        - the value will contain the new controller id when a new controller is plugged in               (Action = 3     )                     |
+    '|        - the value will contain the controller id of a controller that was unplugged or plugged back in (Action = 1 or 2)                     |
+    '|        - a value of 0 (FALSE) if nothing has changed                                                                                          |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+    SHARED CL_SETTINGS AS TYPE__SETTINGS '       need access to library settings
+    DIM Rescan AS INTEGER '                      -1 (TRUE) if controllers need to be rescanned
+    DIM Devices AS INTEGER '                     number of devices currently found
+    DIM d AS INTEGER '                           device counter
+
+    __NEW_CONTROLLER = 0 '                                                    assume no new or previous controller plugged in
+    Action = 0 '                                                              assume no changes
+    d = 0 '                                                                   reset device counter
+    Rescan = 0 '                                                              reset rescan flag
+    Devices = _DEVICES '                                                      get number of devices found
+    IF Devices <> CL_SETTINGS.FoundDevices THEN '                             has a new controller been plugged in?
+        Rescan = -1 '                                                         yes, controllers will need to be rescanned
+        Action = __NEWCONTROLLER '                                            remember that a new controller was plugged in
+    ELSE '                                                                    no, check for previous plugged/unplugged controllers
+        DO '                                                                  begin controller search
+            d = d + 1 '                                                       increment device counter
+            IF __CONNECTED(d) <> CL_CONTROLLER(d).Connected THEN '            has controller connection status changed?
+                Rescan = d '                                                  yes, remember which controller has changed and needs rescanned
+                IF CL_CONTROLLER(d).Connected THEN '                          was the controller connected?
+                    Action = __UNPLUGGED '                                    yes, remember that it was just unplugged
+                ELSE '                                                        no, the controller was disconnected
+                    Action = __PLUGGEDIN '                                    remember that it was just plugged back in
+                END IF
+                EXIT DO '                                                     no need to check any more controllers
+            END IF
+        LOOP UNTIL d = Devices '                                              leave when all controllers checked
+    END IF
+    IF Rescan THEN '                                                          need to scan for new/unplugged/plugged in controllers?
+        __IDENTIFY_CONTROLLERS '                                              yes, identify connected controllers
+        IF Rescan = -1 THEN '                                                 was a new controller found?
+            __NEW_CONTROLLER = CL_SETTINGS.FoundDevices '                     yes, return the new controller id number
+        ELSE '                                                                no, a controller was unplugged/plugged back in
+            __NEW_CONTROLLER = Rescan '                                       return the controller that was unplugged/plugged back in
+        END IF
+    END IF
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __MAKE_BUTTON (Handle AS INTEGER) '                                                                                           __MAKE_BUTTON |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Assigns a value to a user generated integer button variable.                                                                                  |
+    '|                                                                                                                                               |
+    '| DIM UPButton AS INTEGER                                                                                                                       |
+    '| __MAKE_BUTTON UPButton ' define the integer variable UPButton as a user defined button                                                        |
+    '|                                                                                                                                               |
+    '| Handle - the name of the variable the user wishes to use as a button reference.                                                               |
+    '|          The variable's value will change to indicate the new handle value pointing to the button array index.                                |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_BUTTON() AS TYPE__BUTTON ' need access to button array
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__MAKE_BUTTON"
+    IF Handle THEN __ERROR "This button has already been created"
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+----------------------------------------------+
+    '| Create a new entry for the button assignment |
+    '+----------------------------------------------+
+
+    Handle = UBOUND(CL_BUTTON) + 1 '                    set handle to new size of button array
+    REDIM _PRESERVE CL_BUTTON(Handle) AS TYPE__BUTTON ' increase size of button array to match new handle
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __SAVE_BUTTONS () '                                                                                                          __SAVE_BUTTONS |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Saves all assigned buttons for all currently discovered and connected controllers.                                                            |
+    '|                                                                                                                                               |
+    '| __SAVE_BUTTONS                                                                                                                                |
+    '|                                                                                                                                               |
+    '| The config files created for the controllers will be in the form: [Controller Name].ID[Device ID#]                                            |
+    '| For example, a joystick with the name Saitek ST290 Pro found as device number 4 will have the following config file: "Saitek ST290 Pro.ID4"   |
+    '|                                                                                                                                               |
+    '| It's possible for a controller to have multiple config files based on the device id number.                                                   |
+    '|   - "Saitek ST290 Pro.ID3"                                                                                                                    |
+    '|   - "Saitek ST290 Pro.ID4"                                                                                                                    |
+    '|   - "Saitek ST290 Pro.ID5"                                                                                                                    |
+    '|   - etc..                                                                                                                                     |
+    '|                                                                                                                                               |
+    '| This allows for multiple configurations based on which player is using which joystick/game pad in any order.                                  |
+    '|                                                                                                                                               |
+    '| Controllers with no assigned buttons will create config files that are zero bytes in length. This is normal.                                  |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+    SHARED CL_BUTTON() AS TYPE__BUTTON '         need access to button array
+    DIM Fname AS STRING '                        controller config file name
+    DIM b AS INTEGER '                           button counter
+    DIM cid AS INTEGER '                         controller id counter
+    DIM FF AS LONG '                             next available free file handle
+
+    cid = 0 '                                                                                                     reset controller id counter
+    DO '                                                                                                          begin controller search loop
+        cid = cid + 1 '                                                                                           increment controller id counter
+        IF CL_CONTROLLER(cid).Found THEN '                                                                        was this controller found initially?
+            IF __CONNECTED(cid) THEN '                                                                            yes, is this controller still connected?
+
+                '+---------------------------------------------------+
+                '| This controller is in use and currently connected |
+                '| Create and open a config file for this controller |
+                '+---------------------------------------------------+
+
+                Fname = _TRIM$(CL_CONTROLLER(cid).Name) + ".ID" + _TRIM$(STR$(cid)) '                             yes, build the name of controller's config file
+                FF = FREEFILE '                                                                                   get a free file handle
+                OPEN Fname FOR OUTPUT AS #FF '                                                                    open the config file for writing
+                b = 0 '                                                                                           reset button counter
+
+                '+-----------------------------------------------------------------------------+
+                '| Cycle through each assigned button slot. If a button assignment matches the |
+                '| controller name and controller id save the variable assignment value, the   |
+                '| button value (0 if axis is used), and the axis value (0 if button is used). |
+                '+-----------------------------------------------------------------------------+
+
+                DO '                                                                                              begin assignment search and write loop
+                    b = b + 1 '                                                                                   increment button counter
+                    IF CL_BUTTON(b).Slot1.Cname = CL_CONTROLLER(cid).Name AND CL_BUTTON(b).Slot1.cid = cid THEN ' does controller name and id match in slot 1?
+                        WRITE #FF, b, CL_BUTTON(b).Slot1.Button, CL_BUTTON(b).Slot1.Axis '                        yes, write assignment to file
+                    END IF
+                    IF CL_BUTTON(b).Slot2.Cname = CL_CONTROLLER(cid).Name AND CL_BUTTON(b).Slot2.cid = cid THEN ' does controller name and id match in slot 2?
+                        WRITE #FF, b, CL_BUTTON(b).Slot2.Button, CL_BUTTON(b).Slot2.Axis '                        yes, write assignment to file
+                    END IF
+                    IF CL_BUTTON(b).Slot3.Cname = CL_CONTROLLER(cid).Name AND CL_BUTTON(b).Slot3.cid = cid THEN ' does controller name and id match in slot 3?
+                        WRITE #FF, b, CL_BUTTON(b).Slot3.Button, CL_BUTTON(b).Slot3.Axis '                        yes, write assignment to file
+                    END IF
+                    IF CL_BUTTON(b).Slot4.Cname = CL_CONTROLLER(cid).Name AND CL_BUTTON(b).Slot4.cid = cid THEN ' does controller name and id match in slot 4?
+                        WRITE #FF, b, CL_BUTTON(b).Slot4.Button, CL_BUTTON(b).Slot4.Axis '                        yes, write assignment to file
+                    END IF
+                LOOP UNTIL b = UBOUND(CL_BUTTON) '                                                                leave when all button assignments checked
+                CLOSE #FF '                                                                                       close the file
+            END IF
+        END IF
+    LOOP UNTIL cid = 6 '                                                                                          leave when all controllers checked
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __LOAD_BUTTONS () '                                                                                                          __LOAD_BUTTONS |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Loads assigned buttons for controllers from configuration files if they exist.                                                                |
+    '|                                                                                                                                               |
+    '| __LOAD_BUTTONS                                                                                                                                |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+    SHARED CL_BUTTON() AS TYPE__BUTTON '         need access to button array
+    DIM Fname AS STRING '                        controller config file name
+    DIM cid AS INTEGER '                         controller id counter
+    DIM Handle AS INTEGER '                      user defined button handle
+    DIM Button AS INTEGER '                      button to assign (0 if axis)
+    DIM Axis AS INTEGER '                        axis to assign (0 if button)
+    DIM FF AS LONG '                             next available free file handle
+
+    cid = 0 '                                                                         reset controller id counter
+    DO '                                                                              begin controller search loop
+        cid = cid + 1 '                                                               increment controller id counter
+        IF CL_CONTROLLER(cid).Found THEN '                                            was this controller found initially?
+            IF __CONNECTED(cid) THEN '                                                yes, is this controller still connected?
+
+                '+-----------------------------------------------------------------+
+                '| This controller was initially found and is currently connected. |
+                '| Create a config file name to check for.                         |
+                '+-----------------------------------------------------------------+
+
+                Fname = _TRIM$(CL_CONTROLLER(cid).Name) + ".ID" + _TRIM$(STR$(cid)) ' yes, build the name of the controller's config file
+                IF _FILEEXISTS(Fname) THEN '                                          does a config file for this controller exist?
+
+                    '+-------------------------------------------+
+                    '| A config file exists for this controller  |
+                    '| Open the file and assign the buttons/axes |
+                    '+-------------------------------------------+
+
+                    FF = FREEFILE '                                                   yes, get a free file handle
+                    OPEN Fname FOR INPUT AS #FF '                                     open the config file for reading
+                    WHILE NOT EOF(1) '                                                has the end of the file been reached?
+
+                        '+---------------------------------------------------------------+
+                        '| Config files that are zero bytes in length are simply ignored |
+                        '+---------------------------------------------------------------+
+
+                        INPUT #FF, Handle, Button, Axis '                             no, get the button handle, button, and axis settings
+                        IF Button THEN '                                              has a button been assigned?
+                            __ASSIGN_BUTTON Handle, cid, Button '                     yes, assign the button
+                        ELSE '                                                        no, an axis is assigned
+                            __ASSIGN_AXIS Handle, cid, Axis '                         assign the axis as a button
+                        END IF
+                    WEND '                                                            loop back and load next button assignment (if any)
+                    CLOSE #FF '                                                       close the config file
+                END IF
+            END IF
+        END IF
+    LOOP UNTIL cid = 6 '                                                              leave when all controllers searched
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __CONNECTED (cid AS INTEGER) '                                                                                             __CONNECTED |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Returns 0 (FALSE) if a controller is disconnected, -1 (TRUE) otherwise                                                                        |
+    '|                                                                                                                                               |
+    '| Status = __CONNECTED(__JOYPAD1CID)                                                                                                            |
+    '|                                                                                                                                               |
+    '| cid - the id of the controller                                                                                                                |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__CONNECTED"
+    IF cid < 1 OR cid > 6 THEN __ERROR "Invalid controller id."
+    IF CL_CONTROLLER(cid).Found = 0 THEN __ERROR "The specified controller does not exist."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+-------------------------+
+    '| Return connection state |
+    '+-------------------------+
+
+    WHILE _DEVICEINPUT(cid): WEND '                  get latest controller values
+    IF INSTR(_DEVICE$(cid), "[DISCONNECTED]") THEN ' is controller disconnected?
+        __CONNECTED = 0 '                            yes, return that controller is disconnected
+    ELSE '                                           no
+        __CONNECTED = -1 '                           return that controller is connected
+    END IF
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __BUTTON_NAME$ (Handle AS INTEGER, Slot AS INTEGER) '                                                                   __BUTTON_NAME$ |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Retrieves the name of a user defined button.                                                                                                  |
+    '|                                                                                                                                               |
+    '| Description = __BUTTON_NAME$(Up_Button, 1) ' get name of button in slot 1                                                                     |
+    '|                                                                                                                                               |
+    '| Handle - the handle of the user defined button                                                                                                |
+    '| Slot   - the slot number (1 to 4)                                                                                                             |
+    '|          passing the value of 0 will clear all slot assignments and remove the user defined button completely.                                |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_BUTTON() AS TYPE__BUTTON '         need access to button array
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__BUTTON_NAME$"
+    IF Handle < 1 OR Handle > UBOUND(CL_BUTTON) THEN __ERROR "The specified button does not exist."
+    IF Slot < 0 OR Slot > 4 THEN __ERROR "The requested slot assignment does not exist."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+-----------------+
+    '| Get button name |
+    '+-----------------+
+
+    SELECT CASE Slot
+        CASE 1: __BUTTON_NAME$ = CL_BUTTON(Handle).Slot1.Name
+        CASE 2: __BUTTON_NAME$ = CL_BUTTON(Handle).Slot2.Name
+        CASE 3: __BUTTON_NAME$ = CL_BUTTON(Handle).Slot3.Name
+        CASE 4: __BUTTON_NAME$ = CL_BUTTON(Handle).Slot4.Name
+    END SELECT
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __SET_AXIS_THRESHOLD (Value AS SINGLE) '                                                                               __SET_AXIS_THRESHOLD |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Sets the value at which an axis set up as a user defined button is seen as being pressed.                                                     |
+    '|                                                                                                                                               |
+    '| __SET_AXIS_THRESHOLD .25 ' button activated when axis is deflected 25% either UP/DOWN or LEFT/RIGHT                                           |
+    '|                                                                                                                                               |
+    '| Value - .01 (1%) to .99 (99%) of axis deflection                                                                                              |
+    '|                                                                                                                                               |
+    '| NOTE: The default value set up by __INITIALIZE_CONTROLLERS is .5 (50%)                                                                        |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_SETTINGS AS TYPE__SETTINGS ' need access to library settings
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__SET_AXIS_THRESHOLD"
+    IF Value <= 0 OR Value >= 1 THEN __ERROR "Threshold value must be between 0 and 1."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+---------------------+
+    '| Set threshold value |
+    '+---------------------+
+
+    CL_SETTINGS.Threshold = Value ' set value of user defined button axis sensitivity
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __BUTTON_REASSIGN_ALLOWED () '                                                                                    __BUTTON_REASSIGN_ALLOWED |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Enables user defined button reassigning.                                                                                                      |
+    '|                                                                                                                                               |
+    '| __BUTTON_REASSIGN_ALLOWED                                                                                                                     |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_SETTINGS AS TYPE__SETTINGS ' need access to library settings
+
+    '+---------------------------+
+    '| Enable button reassigning |
+    '+---------------------------+
+
+    CL_SETTINGS.Reassign = -1 ' enable button reassigning (TRUE)
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __BUTTON_REASSIGN_NOT_ALLOWED () '                                                                            __BUTTON_REASSIGN_NOT_ALLOWED |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Disables user defined button reassigning.                                                                                                     |
+    '|                                                                                                                                               |
+    '| __BUTTON_REASSIGN_NOT_ALLOWED                                                                                                                 |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_SETTINGS AS TYPE__SETTINGS ' need access to library settings
+
+    '+----------------------------+
+    '| Disable button reassigning |
+    '+----------------------------+
+
+    CL_SETTINGS.Reassign = 0 ' disable button reassigning (FALSE)
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __REMOVE_BUTTON (Handle AS INTEGER, Slot AS INTEGER) '                                                                      __REMOVE_BUTTON |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Removes an assigned button or axis from a user defined button. Optionally the entire user defined button can be removed by supplying the      |
+    '| value of 0 for slot.                                                                                                                          |
+    '|                                                                                                                                               |
+    '| __REMOVE_BUTTON UP_Button, 3 ' remove the button/axis assigned in the third slot                                                              |
+    '|                                                                                                                                               |
+    '| Handle - the handle of the user defined button                                                                                                |
+    '| Slot   - the assigned slot to clear (0 to 4)                                                                                                  |
+    '|          passing the value of 0 will clear all slot assignments and remove the user defined button completely.                                |
+    '|                                                                                                                                               |
+    '| When a defined button is removed from a slot the assignments in slots above are shifted down. For example, if the assignment in slot 1 is     |
+    '| removed then the assignment in 2 is shifted to 1, 3 is shifted to 2, 4 is shifted to 3, and 4 is cleared.                                     |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_BUTTON() AS TYPE__BUTTON ' need access to button array
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__REMOVE_BUTTON"
+    IF Handle < 1 OR Handle > UBOUND(CL_BUTTON) THEN __ERROR "The specified button does not exist."
+    IF Slot < 0 OR Slot > 4 THEN __ERROR "The requested slot assignment does not exist."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+----------------------+
+    '| Remove assignment(s) |
+    '+----------------------+
+
+    SELECT CASE Slot '                                          which slot?
+        CASE 0 '                                                [ALL SLOTS]
+            CL_BUTTON(Handle).Slot1 = CL_BUTTON(Handle).Slot0 ' clear slot 1
+            CL_BUTTON(Handle).Slot2 = CL_BUTTON(Handle).Slot0 ' clear slot 2
+            CL_BUTTON(Handle).Slot3 = CL_BUTTON(Handle).Slot0 ' clear slot 3
+            CL_BUTTON(Handle).Slot4 = CL_BUTTON(Handle).Slot0 ' clear slot 4
+        CASE 1 '                                                [SLOT1]
+            CL_BUTTON(Handle).Slot1 = CL_BUTTON(Handle).Slot2 ' move slot 2 up to slot 1
+            CL_BUTTON(Handle).Slot2 = CL_BUTTON(Handle).Slot3 ' move slot 3 up to slot 2
+            CL_BUTTON(Handle).Slot3 = CL_BUTTON(Handle).Slot4 ' move slot 4 up to slot 3
+            CL_BUTTON(Handle).Slot4 = CL_BUTTON(Handle).Slot0 ' clear slot 4
+        CASE 2 '                                                [SLOT2]
+            CL_BUTTON(Handle).Slot2 = CL_BUTTON(Handle).Slot3 ' move slot 3 up to slot 2
+            CL_BUTTON(Handle).Slot3 = CL_BUTTON(Handle).Slot4 ' move slot 4 up to slot 3
+            CL_BUTTON(Handle).Slot4 = CL_BUTTON(Handle).Slot0 ' clear slot 4
+        CASE 3 '                                                [SLOT3]
+            CL_BUTTON(Handle).Slot3 = CL_BUTTON(Handle).Slot4 ' move slot 4 up to slot 3
+            CL_BUTTON(Handle).Slot4 = CL_BUTTON(Handle).Slot0 ' clear slot 4
+        CASE 4 '                                                [SLOT4]
+            CL_BUTTON(Handle).Slot4 = CL_BUTTON(Handle).Slot0 ' clear slot 4
+    END SELECT
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __JOYPAD_EXISTS (Number AS INTEGER) '                                                                                  __JOYPAD_EXISTS |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Returns the total number of joysticks/game pads that exist (TREU) if the selected joystick/game pad exists, 0 (FALSE) otherwise.              |
+    '|                                                                                                                                               |
+    '| JoyPads = __JOYPAD_EXISTS(1) '                                     get total number of joysticks/game pads (if any)                           |
+    '| IF JoyPads THEN '                                                  was the selected joypad found?                                             |
+    '|     PRINT "Joystick 1 of"; STR$(JoyPads); " found!" '              yes, report findings                                                       |
+    '|     Print "Joystick name    : ";__CONTROLLER_NAME$(__JOYPAD1CID)                                                                              |
+    '|     PRINT "Number of buttons:"; __BUTTON_TOTAL(__JOYPAD1CID)                                                                                  |
+    '|     PRINT "Number of axes   :"; __AXIS_TOTAL(__JOYPAD1CID)                                                                                    |
+    '| END IF                                                                                                                                        |
+    '|                                                                                                                                               |
+    '| number - the joystick/game pad to query                                                                                                       |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    DIM Found AS INTEGER ' joypad found (t/f)
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__JOYPAD_EXISTS"
+    IF Number < 1 OR Number > 6 THEN __ERROR "The requested joystick/game pad does not exist."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+---------------------------------------+
+    '| Report existance of joystick/game pad |
+    '+---------------------------------------+
+
+    Found = 0 '                                   assume no joystick/game pad found
+    __JOYPAD_EXISTS = 0 '                         assume there are no joypads
+    SELECT CASE Number '                          which joypad are we looking for?
+        CASE 1 '                                  joypad 1
+            IF __JOYPAD1CID THEN Found = -1 '     record found if present
+        CASE 2 '                                  etc..
+            IF __JOYPAD2CID THEN Found = -1
+        CASE 3
+            IF __JOYPAD3CID THEN Found = -1
+        CASE 4
+            IF __JOYPAD4CID THEN Found = -1
+        CASE 5
+            IF __JOYPAD5CID THEN Found = -1
+        CASE 6
+            IF __JOYPAD6CID THEN Found = -1
+    END SELECT
+    IF Found THEN '                               was a joypad found?
+        IF __JOYPAD6CID THEN '                    yes, are there 6 joypads?
+            __JOYPAD_EXISTS = 6 '                 yes, return that 6 exist
+        ELSEIF __JOYPAD5CID THEN '                no, are there 5 joypads?
+            __JOYPAD_EXISTS = 5 '                 yes, return that 5 exist
+        ELSEIF __JOYPAD4CID THEN '                etc..
+            __JOYPAD_EXISTS = 4
+        ELSEIF __JOYPAD3CID THEN
+            __JOYPAD_EXISTS = 3
+        ELSEIF __JOYPAD2CID THEN
+            __JOYPAD_EXISTS = 2
+        ELSEIF __JOYPAD1CID THEN
+            __JOYPAD_EXISTS = 1
+        END IF
+    END IF
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __MOUSE_EXISTS () '                                                                                                     __MOUSE_EXISTS |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Returns -1 (TRUE) if the mouse controller exists, 0 (FALSE) otherwise.                                                                        |
+    '|                                                                                                                                               |
+    '| IF __MOUSE_EXISTS THEN PRINT "Mouse found!"                                                                                                   |
+    '|                                                                                                                                               |
+    '| NOTE: It's highly unlikely that a mouse will not exist but for those instances where someone may have created a stand alone computer for      |
+    '|       playing QB64 games without a mouse (and/or a keyboard) but just joysticks attached this function is available.                          |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    __MOUSE_EXISTS = 0 '                     assume no mouse
+    IF __MOUSECID THEN __MOUSE_EXISTS = -1 ' report that mouse found
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __KEYBOARD_EXISTS () '                                                                                               __KEYBOARD_EXISTS |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Returns -1 (TRUE) if the keyboard controller exists, 0 (FALSE) otherwise.                                                                     |
+    '|                                                                                                                                               |
+    '| IF __KEYBOARD_EXISTS THEN PRINT "Keyboard found!"                                                                                             |
+    '|                                                                                                                                               |
+    '| NOTE: It's highly unlikely that a keyboard will not exist but for those instances where someone may have created a stand alone computer for   |
+    '|       playing QB64 games without a keyboard (and/or a mouse) but just joysticks attached this function is available.                          |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    __KEYBOARD_EXISTS = 0 '                        assume no keyboard
+    IF __KEYBOARDCID THEN __KEYBOARD_EXISTS = -1 ' report that keyboard was found
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __MAP_AXIS (AxisValue AS SINGLE, Lower AS INTEGER, Upper AS INTEGER) '                                                      __MAP_AXIS |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Maps a joypad or mouse axis value from -1 to 1 to another defined range.                                                                      |
+    '|                                                                                                                                               |
+    '| Xaxis = __MAP_AXIS(__CONTROLLER_AXIS(__JOYPAD1CID, 1), 0, 255) ' map -1 to 1 as 0 to 255                                                      |
+    '|                                                                                                                                               |
+    '| AxisValue - current axis value (must be -1 to 1)                                                                                              |
+    '| Lower     - the new lower value range                                                                                                         |
+    '| Upper     - the new upper value range                                                                                                         |
+    '|                                                                                                                                               |
+    '| NOTE: This function will only work correctly when AxisValue is between -1 and 1.                                                              |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__MAP_AXIS"
+    IF AxisValue < -1 OR AxisValue > 1 THEN __ERROR "Axis value must be between -1 and 1."
+    IF Lower >= Upper THEN __ERROR "The lower value must be less than the upper value."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+-----------------------------------+
+    '| Convert input to new output range |
+    '+-----------------------------------+
+
+    __MAP_AXIS = INT(Lower + (AxisValue + 1) * (Lower - Upper) / -2) ' convert input to adjusted output
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __AXIS_TOTAL (cid AS INTEGER) '                                                                                           __AXIS_TOTAL |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Returns the number of axes a controller has.                                                                                                  |
+    '|                                                                                                                                               |
+    '| Total = __AXIS_TOTAL(__JOYPAD1CID)                                                                                                            |
+    '|                                                                                                                                               |
+    '| cid - the controller id                                                                                                                       |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__AXIS_TOTAL"
+    IF cid < 1 OR cid > 6 THEN __ERROR "Invalid controller id."
+    IF CL_CONTROLLER(cid).Found = 0 THEN __ERROR "The specified controller does not exist."
+    IF CL_CONTROLLER(cid).Axis = 0 THEN __ERROR "The specified controller has no axes."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+----------------------------------+
+    '| Return number of controller axis |
+    '+----------------------------------+
+
+    __AXIS_TOTAL = CL_CONTROLLER(cid).Axis ' return number of axes
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __BUTTON_TOTAL (cid AS INTEGER) '                                                                                       __BUTTON_TOTAL |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Returns the number of buttons a controller has.                                                                                               |
+    '|                                                                                                                                               |
+    '| Total = __BUTTON_TOTAL(__JOYPAD1CID)                                                                                                          |
+    '|                                                                                                                                               |
+    '| cid - the controller id                                                                                                                       |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__BUTTON_TOTAL"
+    IF cid < 1 OR cid > 6 THEN __ERROR "Invalid controller id."
+    IF CL_CONTROLLER(cid).Found = 0 THEN __ERROR "The specified controller does not exist."
+    IF CL_CONTROLLER(cid).Buttons = 0 THEN __ERROR "The specified controller has no buttons."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+-------------------------------------+
+    '| Return number of controller buttons |
+    '+-------------------------------------+
+
+    __BUTTON_TOTAL = CL_CONTROLLER(cid).Buttons ' return number of buttons
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __CONTROLLER_BUTTON (cid AS INTEGER, Button AS INTEGER) '                                                          __CONTROLLER_BUTTON |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Returns the state of a controller's button.                                                                                                   |
+    '|                                                                                                                                               |
+    '| Button = __CONTROLLER_BUTTON(__KEYBOARDCID, 329) ' keyboard UP arrow key                                                                      |
+    '|                                                                                                                                               |
+    '| cid    - the controller id                                                                                                                    |
+    '| Button - the controller's button (or keyboard key)                                                                                            |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__CONTROLLER_BUTTON"
+    IF cid < 1 OR cid > 6 THEN __ERROR "Invalid controller id."
+    IF CL_CONTROLLER(cid).Found = 0 THEN __ERROR "The specified controller does not exist."
+    IF CL_CONTROLLER(cid).Buttons = 0 THEN __ERROR "The specified controller has no buttons."
+    IF Button < 1 OR Button > CL_CONTROLLER(cid).Buttons THEN __ERROR "The specified controller does not have this button."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+-----------------------------+
+    '| Return current button state |
+    '+-----------------------------+
+
+    IF __CONNECTED(cid) THEN '                  is controller connected?
+        WHILE _DEVICEINPUT(cid): WEND '         yes, get latest controller values
+        __CONTROLLER_BUTTON = _BUTTON(Button) ' return controller button state
+    END IF
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __CONTROLLER_AXIS (cid AS INTEGER, Axis AS INTEGER) '                                                                __CONTROLLER_AXIS |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Returns the value of a controller's axis. (-1 to 1)                                                                                           |
+    '|                                                                                                                                               |
+    '| Xaxis = __CONTROLLER_AXIS(__JOYPAD1CID, 1) ' x axis of joypad 1                                                                               |
+    '|                                                                                                                                               |
+    '| cid  - the controller id                                                                                                                      |
+    '| Axis - the controller's axis number                                                                                                           |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__CONTROLLER_AXIS"
+    IF cid < 1 OR cid > 6 THEN __ERROR "Invalid controller id."
+    IF CL_CONTROLLER(cid).Found = 0 THEN __ERROR "The specified controller does not exist."
+    IF CL_CONTROLLER(cid).Axis = 0 THEN __ERROR "The specified controller has no axes."
+    IF Axis < 1 OR Axis > CL_CONTROLLER(cid).Axis THEN __ERROR "The specified controller does not have this axis."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+---------------------------+
+    '| Return current axis value |
+    '+---------------------------+
+
+    IF __CONNECTED(cid) THEN '            is controller connected?
+        WHILE _DEVICEINPUT(cid): WEND '   yes, get latest controller values
+        __CONTROLLER_AXIS = _AXIS(Axis) ' return controller axis value
+    END IF
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __CONTROLLER_NAME$ (cid AS INTEGER) '                                                                               __CONTROLLER_NAME$ |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Returns the descriptive name of the controller.                                                                                               |
+    '|                                                                                                                                               |
+    '| PRINT __CONTROLLER_NAME$(__JOYPAD1CID)                                                                                                        |
+    '|                                                                                                                                               |
+    '| cid - the id of the controller                                                                                                                |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__CONTROLLER_NAME$"
+    IF cid < 1 OR cid > 6 THEN __ERROR "Invalid controller id."
+    IF CL_CONTROLLER(cid).Found = 0 THEN __ERROR "The specified controller does not exist"
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+---------------------------+
+    '| Return name of controller |
+    '+---------------------------+
+
+    __CONTROLLER_NAME$ = CL_CONTROLLER(cid).Name ' return the name of the controller
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION __BUTTON_DOWN (Handle AS INTEGER) '                                                                                      __BUTTON_DOWN |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Returns -1 (TRUE) if a button is pressed, 0 (FALSE) otherwise.                                                                                |
+    '|                                                                                                                                               |
+    '| State = __BUTTON_DOWN(UPButton)                                                                                                               |
+    '|                                                                                                                                               |
+    '| Handle - the handle of the button to check                                                                                                    |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_BUTTON() AS TYPE__BUTTON '   need access to button array
+    SHARED CL_SETTINGS AS TYPE__SETTINGS ' need access to library settings
+    DIM Slot AS INTEGER '                  button/axis slot counter
+    DIM cid AS INTEGER '                   controller id
+    DIM Button AS INTEGER '                controller button
+    DIM Axis AS INTEGER '                  controller axis
+    DIM AxisValue AS SINGLE '              controller current axis value
+    DIM Down AS INTEGER '                  button is down (t/f)
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__BUTTON_DOWN"
+    IF Handle < 1 OR Handle > UBOUND(CL_BUTTON) THEN __ERROR "The specified button does not exist."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+-------------------------+
+    '| Report status of button |
+    '+-------------------------+
+
+    Down = 0 '                                                         assume no button/axis pressed
+    Slot = 0 '                                                         reset slot counter
+    DO '                                                               begin button/axis down search
+        Slot = Slot + 1 '                                              increment slot counter
+
+        '+----------------------------------------------------------+
+        '| Get the controller's id, button, and axis from each slot |
+        '+----------------------------------------------------------+
+
+        SELECT CASE Slot '                                             which button/axis slot?
+            CASE 1 '                                                   slot 1
+                cid = CL_BUTTON(Handle).Slot1.cid '                    get controller's id from slot 1
+                Button = CL_BUTTON(Handle).Slot1.Button '              get controller's button from slot 1
+                Axis = CL_BUTTON(Handle).Slot1.Axis '                  get controller's axis from slot 1
+            CASE 2 '                                                   slot 2
+                cid = CL_BUTTON(Handle).Slot2.cid
+                Button = CL_BUTTON(Handle).Slot2.Button
+                Axis = CL_BUTTON(Handle).Slot2.Axis
+            CASE 3 '                                                   slot 3
+                cid = CL_BUTTON(Handle).Slot3.cid
+                Button = CL_BUTTON(Handle).Slot3.Button
+                Axis = CL_BUTTON(Handle).Slot3.Axis
+            CASE 4 '                                                   slot 4
+                cid = CL_BUTTON(Handle).Slot4.cid
+                Button = CL_BUTTON(Handle).Slot4.Button
+                Axis = CL_BUTTON(Handle).Slot4.Axis
+        END SELECT
+        IF cid THEN '                                                  is there a controller id?
+
+            '+---------------------------------------+
+            '| A controller id was found in the slot |
+            '+---------------------------------------+
+
+            WHILE _DEVICEINPUT(cid): WEND '                            yes, get controller's latest values
+            IF Button THEN '                                           does a controller button need checked?
+
+                '+--------------------------------------------+
+                '| This slot contained a button to be checked |
+                '+--------------------------------------------+
+
+                IF _BUTTON(Button) THEN Down = -1 '                    yes, get state of controller button
+            ELSEIF Axis THEN '                                         no, does a controller axis need checked?
+
+                '+-------------------------------------------+
+                '| This slot contained an axis to be checked |
+                '+-------------------------------------------+
+
+                AxisValue = _AXIS(ABS(Axis)) '                         yes, get the current controller axis value
+                IF ABS(AxisValue) >= CL_SETTINGS.Threshold THEN '      is axis deflected at least to sensitivity setting?
+                    IF SGN(AxisValue) = SGN(Axis) THEN Down = -1 '     yes, get state of axis
+                END IF
+            END IF
+        END IF
+    LOOP UNTIL (Slot = 4) OR Down '                                    leave when all four slots checked or a button is down
+    __BUTTON_DOWN = Down '                                             return state of button
+
+END FUNCTION
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __AUTOASSIGN_BUTTON (Handle AS INTEGER) '                                                                               __AUTOASSIGN_BUTTON |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Automatically assigns a button handle with up to a combination of four controller buttons or axis deflections. Simply call this subroutine up |
+    '| to four times to associate each axis or button with the handle. This allows axis deflections to be treated as button presses. Good for top    |
+    '| hats and Nintendo style "plus" directionals.                                                                                                  |
+    '|                                                                                                                                               |
+    '| __AUTOASSIGN_BUTTON UPButton ' player chooses the UP ARROW key for instance and that gets saved in SLOT 1                                     |
+    '| __AUTOASSIGN_BUTTON UPButton ' player chooses the W key for instance and that gets saved in SLOT 2                                            |
+    '| __AUTOASSIGN_BUTTON UPButton ' player chooses the UP direction on a "plus" pad for instance and that gets saved in SLOT 3                     |
+    '| '                              the player now has three different methods of inputting a directional UP movement                              |
+    '|                                                                                                                                               |
+    '| Handle - button handle                                                                                                                        |
+    '|                                                                                                                                               |
+    '| The result of the scan is sent to either __ASSIGN_AXIS or __ASSIGN_BUTTON. See the documentation for these two subrotuines for more           |
+    '| information on how the resulting values are stored and used.                                                                                  |
+    '|                                                                                                                                               |
+    '| NOTE: Once all four button slots are filled any attempt to associate a handle with more axis or buttons is ignored.                           |
+    '|       Mouse axes are ignored during auto assign. Use __ASSIGN_AXIS if you wish to assign a mouse axis as a button (not recommended).          |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+    SHARED CL_SETTINGS AS TYPE__SETTINGS '       need access to library settings
+    DIM cid AS INTEGER '                         controller id
+    DIM Number AS INTEGER '                      axis/button number (or keyboard scan code) counter
+    DIM Button AS INTEGER '                      button number (or keyboard scan code) that was pressed
+    DIM Axis AS INTEGER '                        axis that was deflected
+    DIM AxisValue AS SINGLE '                    value of axis that was deflected
+
+    DO '                                                                  begin controller interaction search
+
+        '+---------------------------------------------+
+        '| Wait for a controller to be interacted with |
+        '+---------------------------------------------+
+
+        _LIMIT 60 '                                                       don't hog the CPU while waiting
+        cid = _DEVICEINPUT '                                              check for a controller interaction
+        IF cid THEN '                                                     was a controller interacted with?
+
+            '+----------------------------------+
+            '| A controller was interacted with |
+            '+----------------------------------+
+
+            WHILE _DEVICEINPUT(cid): WEND
+
+            IF CL_CONTROLLER(cid).Buttons <> 0 THEN '                     yes, does this controler have buttons?
+
+                '+---------------------------------------+
+                '| This controller has buttons available |
+                '+---------------------------------------+
+
+                Number = 0 '                                              yes, reset button number counter
+                Button = 0 '                                              reset button press number
+                DO '                                                      begin button search
+
+                    '+--------------------------------------+
+                    '| Get button (if any) that was pressed |
+                    '+--------------------------------------+
+
+                    Number = Number + 1 '                                 increment button number counter
+                    IF _BUTTON(Number) THEN Button = Number '             record this button number if it was pressed
+                LOOP UNTIL Number = _LASTBUTTON(cid) OR Button '          leave when all buttons checked or a button weas pressed
+            END IF
+
+            '+--------------------------------------------------+
+            '| A check for axis deflection will now be done.    |
+            '| The mouse is purposely excluded from this check. |
+            '+--------------------------------------------------+
+
+            IF cid <> __MOUSECID THEN '                                   is this the mouse controller?
+                IF CL_CONTROLLER(cid).Axis <> 0 THEN '                    no, does this controller have axis?
+
+                    '+------------------------------------+
+                    '| This controller has axis available |
+                    '+------------------------------------+
+
+                    Number = 0 '                                          yes, reset axis number counter
+                    Axis = 0 '                                            reset axis deflection number
+                    DO '                                                  begin axis search
+
+                        '+--------------------------------------------------------------------------+
+                        '| Get axis (if any) that was deflected at least 50% (or threshold setting) |
+                        '+--------------------------------------------------------------------------+
+
+                        Number = Number + 1 '                             increment axis number counter
+                        AxisValue = _AXIS(Number) '                       get current value of axis
+                        IF ABS(AxisValue) >= CL_SETTINGS.Threshold THEN ' was axis delfected at least to sensitivity setting?
+
+                            '+----------------------------------------------------------------------------------------------------------+
+                            '| The axis number is recorded as a negative value if the deflection was in a negative direction.           |
+                            '| Likewise, the axis number is recorded as a positive value if the deflection was in a positive direction. |
+                            '| This allows one axis to be recorded as two separate button actions (UP/DOWN or LEFT/RIGHT).              |
+                            '+----------------------------------------------------------------------------------------------------------+
+
+                            Axis = Number * SGN(AxisValue) '              yes, record axis with sign (+/-) of deflection
+                        END IF
+                    LOOP UNTIL Number = _LASTAXIS(cid) OR Axis '          leave when all axis checked or an axis was deflected
+                END IF
+            END IF
+        END IF
+    LOOP UNTIL cid <> 0 AND (Button <> 0 OR Axis <> 0) '                  leave when a controller interacted with and interaction was with a button or axis
+    IF cid = __KEYBOARDCID THEN _KEYCLEAR '                               clear all keyboard buffers if the keyboard was interacted with
+    IF Button THEN __ASSIGN_BUTTON Handle, cid, Button '                  assign the button to the handle
+    IF Axis THEN __ASSIGN_AXIS Handle, cid, Axis '                        assign the axis to the handle
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __ASSIGN_AXIS (Handle AS INTEGER, cid AS INTEGER, Axis AS INTEGER) '                                                          __ASSIGN_AXIS |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Associates a handle with up to four axis from the mouse or joypads. Simply call this subroutine up to four times to associate a new axis to   |
+    '| the handle. This allows axis deflections to be treated as button presses. Good for top hats and Nintendo style "plus" directionals.           |
+    '|                                                                                                                                               |
+    '| __ASSIGN_AXIS UPButton, __JOYPAD1INPUT, -1 '   joystick/gamepad axis 1 UP                                                                     |
+    '| __ASSIGN_AXIS DOWNButton, __JOYPAD1INPUT, 1 '  joystick/gamepad axis 1 DOWN                                                                   |
+    '| __ASSIGN_AXIS LEFTButton, __JOYPAD1INPUT, -2 ' joystick/gamepad axis 2 LEFT                                                                   |
+    '| __ASSIGN_AXIS RIGHTButton, __JOYPAD1INPUT, 2 ' joystick/gamepad axis 2 RIGHT                                                                  |
+    '|                                                                                                                                               |
+    '| Handle - button handle                                                                                                                        |
+    '| cid    - controller id          (1-keyboard, 2-mouse, 3-joypad, etc..)                                                                        |
+    '| Axis   - controller axis number ( 1 to _LASTAXIS(id) )                                                                                        |
+    '|          the sign (+/-) of Axis determines which deflection direction will be used as a button press.                                         |
+    '|          Negative typically means UP or LEFT and positive typically means DOWN or RIGHT.                                                      |
+    '|                                                                                                                                               |
+    '| NOTE: Once all four button slots are filled any attempt to associate a handle with more axis is ignored.                                      |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+    SHARED CL_BUTTON() AS TYPE__BUTTON '         need access to button array
+    SHARED CL_SETTINGS AS TYPE__SETTINGS '       need access to library settings
+    SHARED CL_KEYNAME() AS STRING '              need access to _BUTTON keyboard key names
+    DIM Assigning AS TYPE__SLOT '                check slot UDT
+    DIM AssignedHandle AS INTEGER '              previously assigned button handle
+    DIM AssignedSlot AS INTEGER '                previously assigned button handle slot
+    DIM Aname AS STRING '                        descriptive axis name
+    DIM Jname AS STRING '                        joystick/game pad name
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__BUTTON_AXIS_ASSIGN"
+    IF CL_CONTROLLER(cid).Found = 0 THEN __ERROR "The specified controller does not exist."
+    IF ABS(Axis) < 1 OR ABS(Axis) > _LASTAXIS(cid) THEN __ERROR "The axis specified does not exist on controller."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+-----------------------------------+
+    '| Check if axis is already assigned |
+    '+-----------------------------------+
+
+    Assigning.cid = cid '                                                      set up check slot UDT
+    Assigning.Button = 0
+    Assigning.Axis = Axis
+
+    IF IUO__ALREADY_ASSIGNED(Assigning, AssignedHandle, AssignedSlot) THEN '   is this axis button already assigned?
+
+        '+-------------------------------------+
+        '| This axis has already been assigned |
+        '+-------------------------------------+
+
+        IF Handle = AssignedHandle THEN '                                      is this axis already assigned to this handle?
+
+            '+---------------------------------------------+
+            '| This axis is aleady assigned to this handle |
+            '+---------------------------------------------+
+
+            EXIT SUB '                                                         yes, leave subroutine so duplicate is not made
+        ELSE '                                                                 no, this is a new valid assignment
+            IF CL_SETTINGS.Reassign THEN '                                     yes, is reassigning allowed?
+
+                '+-----------------------------------+
+                '| Reassigning of buttons is allowed |
+                '+-----------------------------------+
+
+                IF Handle = 0 OR CL_BUTTON(Handle).Slot1.cid = 0_
+                              OR CL_BUTTON(Handle).Slot2.cid = 0_
+                              OR CL_BUTTON(Handle).Slot3.cid = 0_
+                              OR CL_BUTTON(Handle).Slot4.cid = 0 THEN '        yes, is there a slot available?
+
+                    '+---------------------------------------------------------------+
+                    '| This is either a new user assigned button or an existing user |
+                    '| assigned button with a slot availabe so remove old assignment |
+                    '+---------------------------------------------------------------+
+
+                    __REMOVE_BUTTON AssignedHandle, AssignedSlot '             yes, remove previous button assignment
+                END IF
+            ELSE '                                                             no, reassigning not allowed
+
+                '+---------------------------------------+
+                '| Reassigning of buttons is not allowed |
+                '+---------------------------------------+
+
+                EXIT SUB '                                                     leave subroutine
+            END IF
+        END IF
+    END IF
+
+    '+----------------------------------------+
+    '| Create a descriptive name for the axis |
+    '+----------------------------------------+
+
+    Jname = "" '                                                               clear joystick name
+    SELECT CASE cid '                                                          which controller?
+        CASE __MOUSECID '                                                      mouse
+            IF ABS(Axis) = 1 THEN '                                            is this axis 1?
+                IF SGN(Axis) = -1 THEN '                                       yes, up (negative)?
+                    Aname = "Mouse Up" '                                       yes, create name
+                ELSE '                                                         no, down (positive)
+                    Aname = "Mouse Down" '                                     create name
+                END IF
+            ELSE '                                                             no, this must be axis 2
+                IF SGN(Axis) = -1 THEN '                                       left (negative)?
+                    Aname = "Mouse Left" '                                     yes, create name
+                ELSE '                                                         no, right (positive)
+                    Aname = "Mouse Right" '                                    create name
+                END IF
+            END IF
+        CASE __JOYPAD1CID: Jname = "J1" '                                      joystick/game pad 1
+        CASE __JOYPAD2CID: Jname = "J2" '                                      joystick/game pad 2
+        CASE __JOYPAD3CID: Jname = "J3" '                                      joystick/game pad 3
+        CASE __JOYPAD4CID: Jname = "J4" '                                      joystick/game pad 4
+        CASE __JOYPAD5CID: Jname = "J5" '                                      joystick/game pad 5
+        CASE __JOYPAD6CID: Jname = "J6" '                                      joystick/game pad 6
+    END SELECT
+    IF Jname <> "" THEN '                                                      was a joystick name given?
+
+        '+-----------------------------------------+
+        '| The axis belongs to a joystick/game pad |
+        '+-----------------------------------------+
+
+        SELECT CASE ABS(Axis) '                                                        yes, which axis?
+            CASE 1: IF SGN(Axis) = -1 THEN Aname = "A1 Left" ELSE Aname = "A1 Right" ' axis 1, left or right
+            CASE 2: IF SGN(Axis) = -1 THEN Aname = "A2 Up" ELSE Aname = "A2 Down" '    axis 2, up or down
+            CASE 3: IF SGN(Axis) = -1 THEN Aname = "A3 Left" ELSE Aname = "A3 Right" ' axis 3, left or right
+            CASE 4: IF SGN(Axis) = -1 THEN Aname = "A4 Up" ELSE Aname = "A4 Down" '    axis 4, up or down
+        END SELECT
+        Aname = Jname + Aname '                                                        complete joystick name
+    END IF
+
+    '+-------------------------+
+    '| Save button information |
+    '+-------------------------+
+
+    Assigning.cid = cid '                                                      set up button to save
+    Assigning.Button = 0
+    Assigning.Axis = Axis
+    Assigning.Name = Aname
+    Assigning.Cname = __CONTROLLER_NAME$(cid)
+    IF CL_BUTTON(Handle).Slot4.cid THEN '                                      4 buttons/axis already assigned?
+
+        '+--------------------------------------------------------------------------+
+        '| There are no more available slots to assign another axis to this handle. |
+        '+--------------------------------------------------------------------------+
+
+        EXIT SUB '                                                             yes, leave subroutine, no more room
+    ELSEIF CL_BUTTON(Handle).Slot3.cid THEN '                                  no, 3 buttons/axis already assigned?
+        CL_BUTTON(Handle).Slot4 = Assigning
+    ELSEIF CL_BUTTON(Handle).Slot2.cid THEN '                                  no, 2 buttons/axis already assigned?
+        CL_BUTTON(Handle).Slot3 = Assigning
+    ELSEIF CL_BUTTON(Handle).Slot1.cid THEN '                                  no, 1 button/axis already assigned?
+        CL_BUTTON(Handle).Slot2 = Assigning
+    ELSE '                                                                     no buttons/axis have been assigned yet
+        CL_BUTTON(Handle).Slot1 = Assigning
+    END IF
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __ASSIGN_BUTTON (Handle AS INTEGER, cid AS INTEGER, Button AS INTEGER) '                                                    __ASSIGN_BUTTON |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Associates a handle with up to four buttons from the keyboard, mouse, or joypads. Simply call this subroutine up to four times to associate a |
+    '| new button to the handle.                                                                                                                     |
+    '|                                                                                                                                               |
+    '| __ASSIGN_BUTTON FireButton, __KEYBOARDINPUT, CLKEY_SPACEBAR ' keyboard space bar          (in first slot)                                     |
+    '| __ASSIGN_BUTTON FireButton, __JOYPAD1INPUT, 1 '               joystick trigger (button 1) (in second slot)                                    |
+    '|                                                                                                                                               |
+    '| Handle - button handle                                                                                                                        |
+    '| cid    - controller id            (1-keyboard, 2-mouse, 3-joypad, etc..)                                                                      |
+    '| Button - controller button number ( 1 to _LASTBUTTON(id) )                                                                                    |
+    '|                                                                                                                                               |
+    '| NOTE: Once all four button slots are filled any attempt to associate a handle with more buttons is ignored.                                   |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+    SHARED CL_BUTTON() AS TYPE__BUTTON '         need access to button array
+    SHARED CL_SETTINGS AS TYPE__SETTINGS '       need access to library settings
+    SHARED CL_KEYNAME() AS STRING '              need access to _BUTTON keyboard key names
+    DIM Assigning AS TYPE__SLOT '                check slot UDT
+    DIM AssignedHandle AS INTEGER '              previously assigned button handle
+    DIM AssignedSlot AS INTEGER '                previously assigned button handle slot
+    DIM Bname AS STRING '                        descriptive button name
+
+    '+------------------+
+    '| Check for errors |
+    '+------------------+
+
+    __CURRENT_ROUTINE = "__BUTTON_ASSIGN"
+    IF CL_CONTROLLER(cid).Found = 0 THEN __ERROR "The specified controller does not exist."
+    IF Button < 1 OR Button > _LASTBUTTON(cid) THEN __ERROR "The button specified does not exist on controller."
+    __PREVIOUS_ROUTINE = __CURRENT_ROUTINE
+
+    '+-------------------------------------+
+    '| Check if button is already assigned |
+    '+-------------------------------------+
+
+    Assigning.cid = cid '                                                      set up check slot UDT
+    Assigning.Button = Button
+    Assigning.Axis = 0
+
+    IF IUO__ALREADY_ASSIGNED(Assigning, AssignedHandle, AssignedSlot) THEN '   is this button already assigned?
+
+        '+---------------------------------------+
+        '| This button has already been assigned |
+        '+---------------------------------------+
+
+        IF Handle = AssignedHandle THEN '                                      is this button already assigned to this handle?
+
+            '+-----------------------------------------------+
+            '| This button is aleady assigned to this handle |
+            '+-----------------------------------------------+
+
+            EXIT SUB '                                                         yes, leave subroutine so duplicate is not made
+        ELSE '                                                                 no, this is a new valid assignment
+            IF CL_SETTINGS.Reassign THEN '                                     is reassigning allowed?
+
+                '+-----------------------------------+
+                '| Reassigning of buttons is allowed |
+                '+-----------------------------------+
+
+                IF Handle = 0 OR CL_BUTTON(Handle).Slot1.cid = 0_
+                              OR CL_BUTTON(Handle).Slot2.cid = 0_
+                              OR CL_BUTTON(Handle).Slot3.cid = 0_
+                              OR CL_BUTTON(Handle).Slot4.cid = 0 THEN '        yes, is there a slot available?
+
+                    '+---------------------------------------------------------------+
+                    '| This is either a new user assigned button or an existing user |
+                    '| assigned button with a slot availabe so remove old assignment |
+                    '+---------------------------------------------------------------+
+
+                    __REMOVE_BUTTON AssignedHandle, AssignedSlot '             yes, remove previous button assignment
+                END IF
+            ELSE '                                                             no, reassigning not allowed
+
+                '+---------------------------------------+
+                '| Reassigning of buttons is not allowed |
+                '+---------------------------------------+
+
+                EXIT SUB '                                                     leave subroutine
+            END IF
+        END IF
+    END IF
+
+    '+------------------------------------------+
+    '| Create a descriptive name for the button |
+    '+------------------------------------------+
+
+    SELECT CASE cid '                                                          which controller?
+        CASE __KEYBOARDCID '                                                   keyboard
+            Bname = CL_KEYNAME(Button) + " Key" '                              create descriptive keyboard key name
+        CASE __MOUSECID '                                                      mouse
+            IF Button = 1 THEN '                                               left button?
+                Bname = "Left Mouse" '                                         yes, create name
+            ELSEIF Button = 2 THEN '                                           no, middle button?
+                Bname = "Center Mouse" '                                       yes, create name
+            ELSE '                                                             no, must be right button
+                Bname = "Right Mouse" '                                        create name
+            END IF
+        CASE __JOYPAD1CID: Bname = "J1B" + _TRIM$(STR$(Button)) '              joystick/game pad 1, create name
+        CASE __JOYPAD2CID: Bname = "J2B" + _TRIM$(STR$(Button)) '              joystick/game pad 2, create name
+        CASE __JOYPAD3CID: Bname = "J3B" + _TRIM$(STR$(Button)) '              joystick/game pad 3, create name
+        CASE __JOYPAD4CID: Bname = "J4B" + _TRIM$(STR$(Button)) '              joystick/game pad 4, create name
+        CASE __JOYPAD5CID: Bname = "J5B" + _TRIM$(STR$(Button)) '              joystick/game pad 5, create name
+        CASE __JOYPAD6CID: Bname = "J6B" + _TRIM$(STR$(Button)) '              joystick/game pad 6, create name
+    END SELECT
+
+    '+-------------------------+
+    '| Save button information |
+    '+-------------------------+
+
+    Assigning.cid = cid '                                                      set up button to save
+    Assigning.Button = Button
+    Assigning.Axis = 0
+    Assigning.Name = Bname
+    Assigning.Cname = __CONTROLLER_NAME$(cid)
+    IF CL_BUTTON(Handle).Slot4.cid THEN '                                      4 buttons/axis already assigned?
+
+        '+----------------------------------------------------------------------------+
+        '| There are no more available slots to assign another button to this handle. |
+        '+----------------------------------------------------------------------------+
+
+        EXIT SUB '                                                             yes, leave subroutine, no more room
+    ELSEIF CL_BUTTON(Handle).Slot3.cid THEN '                                  no, 3 buttons/axis already assigned?
+        CL_BUTTON(Handle).Slot4 = Assigning
+    ELSEIF CL_BUTTON(Handle).Slot2.cid THEN '                                  no, 2 buttons/axis already assigned?
+        CL_BUTTON(Handle).Slot3 = Assigning
+    ELSEIF CL_BUTTON(Handle).Slot1.cid THEN '                                  no, 1 button/axis already assigned?
+        CL_BUTTON(Handle).Slot2 = Assigning
+    ELSE '                                                                     no buttons/axis have been assigned yet
+        CL_BUTTON(Handle).Slot1 = Assigning
+    END IF
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __IDENTIFY_CONTROLLERS () '                                                                                          __IDENTIFY_CONTROLLERS |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Finds all controllers (keyboard, mouse, gamepad, joystick) connected to the computer and polls them for information.                          |
+    '|                                                                                                                                               |
+    '| __IDENTIFY_CONTROLLERS                                                                                                                        |
+    '|                                                                                                                                               |
+    '| The following SHARED variables will be set with the controller's device id:                                                                   |
+    '|   __KEYBOARDCID - usually 1 if found, 0 otherwise                                                                                             |
+    '|   __MOUSECID    - usually 2 if found, 0 otherwise                                                                                             |
+    '|   __JOYPAD1CID  - usually 3 if found (typical: 1st game pad, 1st joystick, 1st flight yoke, 1st steering wheel)                               |
+    '|   __JOYPAD2CID  - usually 4 if found (typical: 2nd game pad, 2nd joystick, 2nd flight yoke, 1st rudder pedals, 1st gas/brake pedals)          |
+    '|   __JOYPAD3CID  - usually 5 if found (typical: 3rd game pad, 3rd joystick, 3rd flight yoke, 2nd rudder pedals, 2nd steering wheel)            |
+    '|   __JOYPAD4CID  - usually 6 if found (typical: 4th game pad, 4th joystick, 4th flight yoke, 2nd/3rd rudder pedals, 2nd/3rd gas/brake pedals)  |
+    '|                                                                                                                                               |
+    '| NOTE: The library will store the information for up to 6 controllers. This is typically 1 keyboard, 1 mouse, and up to four game pads and/or  |
+    '|       joysticks. The "typical:" devices listed above are what I experienced when plugging these devices into my system. Your configuration    |
+    '|       may vary wildly. If no keyboard or mouse is present it's possible to have up to six joysticks/game pads detected and stored.            |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+    SHARED CL_SETTINGS AS TYPE__SETTINGS '       need access to library settings
+    DIM Devices AS INTEGER '                     number of controller devices connected to computer
+    DIM Device AS STRING '                       description and properties of controller device
+    DIM cid AS INTEGER '                         controller id loop counter
+    DIM Start AS INTEGER '                       beginning position of device name
+    DIM Finish AS INTEGER '                      ending position of device name
+
+    __KEYBOARDCID = 0 '                                                         reset input controller identifiers
+    __MOUSECID = 0
+    __JOYPAD1CID = 0
+    __JOYPAD2CID = 0
+    __JOYPAD3CID = 0
+    __JOYPAD4CID = 0
+    __JOYPAD5CID = 0
+    __JOYPAD6CID = 0
+    Devices = _DEVICES '                                                        get number of controllers connected to system
+    CL_SETTINGS.FoundDevices = Devices '                                        record number of devices initially found
+    cid = 0 '                                                                   reset controller counter
+    DO '                                                                        begin controller identification loop
+        cid = cid + 1 '                                                         increment controller counter
+        IF cid <= Devices THEN '                                                was a controller found?
+            Device = _DEVICE$(cid) '                                            yes, get controller properties
+            CL_CONTROLLER(cid).Found = -1 '                                     mark this controller as found
+            IF INSTR(Device, "[KEYBOARD]") THEN '                               is this a keyboard?
+                CL_CONTROLLER(cid).Name = "KEYBOARD" '                          set a default descriptive name
+                __KEYBOARDCID = cid '                                           set keyboard's input controller id
+            END IF
+            IF INSTR(Device, "[MOUSE]") THEN '                                  is this a mouse?
+                CL_CONTROLLER(cid).Name = "MOUSE" '                             set a default descriptive name
+                __MOUSECID = cid '                                              set mouse' input controller id
+            END IF
+            IF INSTR(Device, "[DISCONNECTED]") THEN '                           is this controller disconnected?
+                CL_CONTROLLER(cid).Connected = 0 '                              yes, mark controller as disconnected
+            ELSE '                                                              no, controller is connected
+                CL_CONTROLLER(cid).Connected = -1 '                             mark controller as connected
+            END IF
+            IF INSTR(Device, "[CONTROLLER]") THEN '                             is this a game pad or joystick?
+
+                '+---------------------------------------------------------+
+                '| A generic name will be given to the joystick/game pad   |
+                '| in the event the controller may not have a [NAME] field |
+                '| Note: controllers 5 and/or 6 will only exist if the     |
+                '|       keyboard and/or mouse are not connected           |
+                '+---------------------------------------------------------+
+
+                IF __JOYPAD5CID THEN '                                          has joypad5's id already been set?
+                    __JOYPAD6CID = cid '                                        yes, set joypad6's input controller id
+                    CL_CONTROLLER(cid).Name = "JOYPAD6" '                       set a default descriptive name
+                ELSEIF __JOYPAD4CID THEN '                                      has joypad4's id already been set?
+                    __JOYPAD5CID = cid '                                        yes, set joypad5's input controller id
+                    CL_CONTROLLER(cid).Name = "JOYPAD5" '                       set a default descriptive name
+                ELSEIF __JOYPAD3CID THEN '                                      has joypad3's id already been set?
+                    __JOYPAD4CID = cid '                                        yes, set joypad4's input controller id
+                    CL_CONTROLLER(cid).Name = "JOYPAD4" '                       set a default descriptive name
+                ELSEIF __JOYPAD2CID THEN '                                      no, has joypad2's id already been set?
+                    __JOYPAD3CID = cid '                                        yes, set joypad3's input controller id
+                    CL_CONTROLLER(cid).Name = "JOYPAD3" '                       set a default descriptive name
+                ELSEIF __JOYPAD1CID THEN '                                      no, has joypad1's id already been set?
+                    __JOYPAD2CID = cid '                                        yes, set joypad2's input controller id
+                    CL_CONTROLLER(cid).Name = "JOYPAD2" '                       set a default descriptive name
+                ELSE '                                                          no joypad ids set yet
+                    __JOYPAD1CID = cid '                                        set joypad1's input controller id
+                    CL_CONTROLLER(cid).Name = "JOYPAD1" '                       set a default descriptive name
+                END IF
+            END IF
+            IF INSTR(Device, "[BUTTON]") THEN '                                 does this controller have buttons?
+                CL_CONTROLLER(cid).Buttons = _LASTBUTTON(cid) '                 yes, record number of buttons controller has
+            ELSE '                                                              no
+                CL_CONTROLLER(cid).Buttons = 0 '                                record no buttons
+            END IF
+            IF INSTR(Device, "[AXIS]") THEN '                                   does this controller have axis inputs?
+                CL_CONTROLLER(cid).Axis = _LASTAXIS(cid) '                      yes, record number of axis controller has
+            ELSE '                                                              no
+                CL_CONTROLLER(cid).Axis = 0 '                                   record no axis
+            END IF
+            IF INSTR(Device, "[WHEEL]") THEN '                                  does this controller have wheels?
+                CL_CONTROLLER(cid).Wheels = _LASTWHEEL(cid) '                   yes, record number of wheels controller has
+            ELSE '                                                              no
+                CL_CONTROLLER(cid).Wheels = 0 '                                 record no wheels
+            END IF
+            IF INSTR(Device, "[NAME]") THEN '                                   is there a more descriptive name for this controller?
+
+                '+-------------------------------------------------------------+
+                '| Replace the generic name given with the controller's [NAME] |
+                '+-------------------------------------------------------------+
+
+                Start = INSTR(Device, "[NAME]") + 7 '                           yes, get the start position of the name
+                Finish = INSTR(Start, Device, "]") '                            get the end position of the name
+                CL_CONTROLLER(cid).Name = MID$(Device, Start, Finish - Start) ' extract and only use the descriptive name of the controller
+            END IF
+        ELSE '                                                                  no controller here
+            CL_CONTROLLER(cid) = CL_CONTROLLER(0) '                             reset all controller settings
+        END IF
+    LOOP UNTIL cid = Devices OR cid = 6 '                                       leave when all controllers polled
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __INITIALIZE_CONTROLLERS () '                                                                                      __INITIALIZE_CONTROLLERS |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Identify number and type of controllers and set initial variable values                                                                       |
+    '|                                                                                                                                               |
+    '| __INITIALIZE_CONTROLLERS                                                                                                                      |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_KEYNAME() AS STRING '              need access to _BUTTON keyboard key names
+    SHARED CL_BUTTON() AS TYPE__BUTTON '         need access to user assigned buttons
+    SHARED CL_CONTROLLER() AS TYPE__CONTROLLER ' need access to controller array
+    REDIM CL_BUTTON(1) AS TYPE__BUTTON '         clear user assigned buttons
+    DIM k AS INTEGER '                           key counter
+
+    __KEYBOARDCID = 0 '                      these will contain the device ids (_DEVICES)
+    __MOUSECID = 0
+    __JOYPAD1CID = 0
+    __JOYPAD2CID = 0
+    __JOYPAD3CID = 0
+    __JOYPAD4CID = 0
+    __JOYPAD5CID = 0
+    __JOYPAD6CID = 0
+    FOR k = 0 TO 6 '                         clear controller array
+        CL_CONTROLLER(k).Found = 0
+        CL_CONTROLLER(k).Name = ""
+        CL_CONTROLLER(k).Buttons = 0
+        CL_CONTROLLER(k).Axis = 0
+        CL_CONTROLLER(k).Wheels = 0
+    NEXT k
+    __IDENTIFY_CONTROLLERS '                 identify controllers attached to system
+    __SET_AXIS_THRESHOLD .5 '                set sensitivity of axis user defined button detection
+    __BUTTON_REASSIGN_ALLOWED '              allow user defined button reassignments
+    FOR k = 1 TO 350 '                       read in names of keyboard controller keys
+        CL_KEYNAME(k) = "" '                 clear key name
+        IF k < 90 THEN READ CL_KEYNAME(k) '  first 89 names are in data statements
+        IF k = 285 THEN READ CL_KEYNAME(k) ' 285, 90 through 284 are skipped
+        IF k = 286 THEN READ CL_KEYNAME(k) ' 286
+        IF k = 310 THEN READ CL_KEYNAME(k) ' 310, 287 through 309 are skipped
+        IF k > 325 THEN READ CL_KEYNAME(k) ' 326 through 350 are in data statements
+    NEXT k
+
+    'Keyboard _BUTTON   1 - 20
+    DATA "","Escape","1","2","3","4","5","6","7","8","9","0","Minus","Equals","Backspace","Tab","Q","W","E","R"
+    'Keyboard _BUTTON  21 - 40
+    DATA "T","Y","U","I","O","P","Left Bracket","Right Bracket","Enter","Left CTRL","A","S","D","F","G","H","J","K","L","Semicolon"
+    'Keyboard _BUTTON  41 - 50
+    DATA "Quote","","Left Shift","Back Slash","Z","X","C","V","B","N"
+    'Keyboard _BUTTON  51 - 60
+    DATA "M","Comma","Period","Fore Slash","Right Shift","Numpad Multiply","","Space Bar","Caps Lock","F1"
+    'Keyboard _BUTTON  61 - 70
+    DATA "F2","F3","F4","F5","F6","F7","F8","F9","","Pause"
+    'Keyboard _BUTTON  71 - 80
+    DATA "Scroll Lock","Numpad 7","Numpad 8","Numpad 9","Numpad Minus","Numpad 4","Numpad 5","Numpad 6","Numpad Plus","Numpad 1"
+    'Keyboard _BUTTON  81 - 89
+    DATA "Numpad 2","Numpad 3","Numpad 0","Numpad Period","","","","F11","F12"
+    'Keyboard _BUTTON 285 - 286
+    DATA "Numpad Enter","Right CTRL"
+    'Keyboard _BUTTON 310
+    DATA "Numpad Divide"
+    'Keyboard _BUTTON 326 - 340
+    DATA "Number Lock","","Home","UP Arrow","Page UP","","LEFT Arrow","","RIGHT Arrow","","End","DOWN Arrow","Page Down","Insert","Delete"
+    'Keyboard _BUTTON 341 - 350
+    DATA "","","","","","","","Left Win","Right Win","Menu"
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+SUB __ERROR (Message AS STRING) '                                                                                                       __ERROR |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Set screen to text mode and display error information passed in.                                                                              |
+    '|                                                                                                                                               |
+    '| __ERROR "Message"                                                                                                                             |
+    '|                                                                                                                                               |
+    '| NOTE: Fatal error trap - halts program execution.                                                                                             |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    _FULLSCREEN _OFF '                                                    turn off full screen if active
+    SCREEN 0, 0, 0, 0 '                                                   set screen to pure text mode
+    CLS '                                                                 clear screen
+    PLAY "l64o3ao2ao1ao3ao2ao1ao3ao2ao1a" '                               get developer's attention
+    COLOR 12, 0
+    PRINT '                                                               print error message
+    PRINT " Controller Library has encountered the following error condition:"
+    COLOR 15, 0
+    PRINT
+    PRINT " Error in routine: ";
+    COLOR 14, 0
+    PRINT __CURRENT_ROUTINE
+    COLOR 15, 0
+    PRINT " Previous routine: ";
+    COLOR 14, 0
+    PRINT __PREVIOUS_ROUTINE
+    COLOR 11, 0
+    PRINT
+    PRINT " "; Message
+    COLOR 7, 0
+    _KEYCLEAR '                                                           clear all key buffers
+    END '                                                                 terminate with "Press any key to continue..."
+
+END SUB
+' ______________________________________________________________________________________________________________________________________________
+'/                                                                                                                                              \
+FUNCTION IUO__ALREADY_ASSIGNED (Button AS TYPE__SLOT, Handle AS INTEGER, Slot AS INTEGER) '                               IUO__ALREADY_ASSIGNED |
+    ' __________________________________________________________________________________________________________________________________________|____
+    '/                                                                                                                                               \
+    '| Returns -1 (TRUE) if a button is already assigned, 0 (FALSE) otherwise.                                                                       |
+    '|                                                                                                                                               |
+    '| IF IUO__ALREADY_ASSIGNED(Assigning, HandleFound, SlotFound)                                                                                   |
+    '|                                                                                                                                               |
+    '| Button - the new button being assigned                                                                                                        |
+    '| Handle - the button handle that already contains this assignment                                                                              |
+    '| Slot   - the slot number that already contains this assignment                                                                                |
+    '|                                                                                                                                               |
+    '| NOTE: IUO - Internal Use Only                                                                                                                 |
+    '\_______________________________________________________________________________________________________________________________________________/
+
+    SHARED CL_BUTTON() AS TYPE__BUTTON ' need access to button array
+
+    IUO__ALREADY_ASSIGNED = 0 '                                       assume button is not preassigned
+    Handle = 0 '                                                      reset button handle
+    Slot = 0 '                                                        reset slot number
+    DO '                                                              begin assignment search
+        Handle = Handle + 1 '                                         increment handle counter
+        IF CL_BUTTON(Handle).Slot1.cid = Button.cid THEN '            do the controller ids match in slot 1?
+            IF CL_BUTTON(Handle).Slot1.Button = Button.Button THEN '  yes, do the buttons match?
+                IF CL_BUTTON(Handle).Slot1.Axis = Button.Axis THEN '  yes, do the axes match?
+                    Slot = 1 '                                        yes, slot 1 already has this button assigned
+                END IF
+            END IF
+        END IF
+        IF CL_BUTTON(Handle).Slot2.cid = Button.cid THEN
+            IF CL_BUTTON(Handle).Slot2.Button = Button.Button THEN
+                IF CL_BUTTON(Handle).Slot2.Axis = Button.Axis THEN
+                    Slot = 2 '                                        slot 2 already has this button assigned
+                END IF
+            END IF
+        END IF
+        IF CL_BUTTON(Handle).Slot3.cid = Button.cid THEN
+            IF CL_BUTTON(Handle).Slot3.Button = Button.Button THEN
+                IF CL_BUTTON(Handle).Slot3.Axis = Button.Axis THEN
+                    Slot = 3 '                                        slot 3 already has this button assigned
+                END IF
+            END IF
+        END IF
+        IF CL_BUTTON(Handle).Slot4.cid = Button.cid THEN
+            IF CL_BUTTON(Handle).Slot4.Button = Button.Button THEN
+                IF CL_BUTTON(Handle).Slot4.Axis = Button.Axis THEN
+                    Slot = 4 '                                        slot 4 already has this button assigned
+                END IF
+            END IF
+        END IF
+    LOOP UNTIL (Handle = UBOUND(CL_BUTTON)) OR Slot '                 leave when all checked or a slot contains assignment
+    IF Slot THEN IUO__ALREADY_ASSIGNED = -1 '                         report button already assigned
+
+END FUNCTION

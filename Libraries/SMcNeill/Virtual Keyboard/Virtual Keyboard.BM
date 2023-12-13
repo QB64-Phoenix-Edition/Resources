@@ -1,0 +1,354 @@
+$IF VKBI = UNDEFINED THEN
+    '$INCLUDE:'Virtual Keyboard.BI'
+$END IF
+
+
+FUNCTION VK_Keydown (Which)
+    FOR i = 0 TO 10
+        IF Buttons(i).Value = Which AND Buttons(i).Held = -1 THEN VK_Keydown = -1
+    NEXT
+END FUNCTION
+
+
+FUNCTION VK_Keyhit& (Which)
+    STATIC AS INTEGER x, y 'so as to not interfer with any global variables
+    x = _MOUSEX - Virtual_KB(Which).Xoffset
+    y = _MOUSEY - Virtual_KB(Which).Yoffset
+
+    xsize = Virtual_KB(Which).Xsize
+    ysize = Virtual_KB(Which).Ysize
+    yon = x \ Virtual_KB(Which).Xsize
+    xon = y \ Virtual_KB(Which).Ysize
+
+    'first let's check mouse position
+    IF xon < 0 OR xon > 10 THEN GOTO safe_exit: 'mouse is not in keyboard zone
+    IF yon < 0 OR yon > 255 THEN GOTO safe_exit: 'once again, mouse is not in keyboard zone
+    IF Keyboard_Values(Which, xon, yon).Value = 0 THEN GOTO safe_exit: 'it's a key with no return code.
+    'LOCATE 1, 1: PRINT Keyboard_Values(Which, xon, yon).State
+
+    out$ = Keyboard_Values(Which, xon, yon).Caption
+    IF _MOUSEBUTTON(1) THEN
+        SELECT CASE Keyboard_Values(Which, xon, yon).State
+            CASE 0 'mouse is down and key is marked as up
+                first_zero = 0
+                FOR i = 0 TO 10 'check to see if this button matches one we're already tracking
+                    '            or if we already have the maximum amount of buttons pressed.
+                    IF Buttons(i).Value = Keyboard_Values(Which, xon, yon).Value THEN GOTO safe_exit:
+                    IF Buttons(i).Value = 0 AND first_zero = 0 THEN first_zero = i
+                NEXT
+                IF first_zero = 0 THEN GOTO safe_exit: 'all buttons are currently pressed.
+
+                Buttons(first_zero).Value = Keyboard_Values(Which, xon, yon).Value
+                Buttons(first_zero).Time = ExtendedTimer + Repeat_Speed
+                Buttons(first_zero).Caption = Keyboard_Values(Which, xon, yon).Caption
+                VK_Keyhit = Keyboard_Values(Which, xon, yon).Value 'button is now marked down.
+
+                Set_States out$, Which, -1 'Now we're down
+                Toggle_Button out$, Which
+            CASE -1 'mouse is down, key is down.
+                '    We just ignore it
+            CASE -2 'We went from up to down to up to down before the repeat cycle began.
+                '    Let's lock the key down
+                Set_States out$, Which, -3 'and we're now in a hold state
+                FOR i = 0 TO 10
+                    IF Buttons(i).Value = Keyboard_Values(Which, xon, yon).Value THEN Buttons(i).Held = -1
+                NEXT
+            CASE -4 'We had a held button, and now it's been clicked on and released
+                FOR i = 0 TO 10
+                    IF Buttons(i).Value = Keyboard_Values(Which, xon, yon).Value THEN Buttons(i).Held = 0
+                NEXT
+
+        END SELECT
+    ELSE 'We started out down, but...
+        IF Keyboard_Values(Which, xon, yon).State = -1 THEN Set_States out$, Which, -2 'Now we're up
+        IF Keyboard_Values(Which, xon, yon).State = -3 THEN Set_States out$, Which, -4 'Now we're up
+    END IF
+
+    safe_exit:
+    FOR i = 0 TO 10
+        IF Buttons(i).Caption = "" THEN _CONTINUE
+        IF Buttons(i).Time = 0 THEN _CONTINUE
+        IF Buttons(i).Held THEN _CONTINUE
+        SELECT CASE Buttons(i).Value 'buttons value is the value of the key hit
+            CASE IS <> 0 ' key has been hit and registered
+                IF ExtendedTimer > Buttons(i).Time THEN
+                    out$ = Buttons(i).Caption
+                    Set_States out$, Which, 0 'Now we're up
+                    Toggle_Button out$, Which
+                    Buttons(i).Value = 0: Buttons(i).Time = 0: Buttons(i).Caption = ""
+                END IF
+        END SELECT
+    NEXT
+
+END FUNCTION
+
+SUB Set_States (out$, Which, State)
+    FOR j = 0 TO 10
+        FOR z = 0 TO 255
+            IF Keyboard_Values(Which, j, z).Caption = out$ THEN
+                Keyboard_Values(Which, j, z).State = State
+            END IF
+        NEXT
+        skip:
+    NEXT
+END SUB
+
+SUB Reset_Buttons (Which)
+    FOR j = 0 TO 10
+        FOR z = 0 TO 255
+            Keyboard_Values(Which, j, z).State = 0
+            IF Keyboard_Values(Which, j, z).Caption <> "" THEN
+                Toggle_Button Keyboard_Values(Which, j, z).Caption, Which
+            END IF
+        NEXT
+
+        Buttons(j).Time = 0
+        Buttons(j).Value = 0
+        Buttons(j).Held = 0
+        Buttons(j).Caption = ""
+    NEXT
+END SUB
+
+
+SUB Toggle_Button (out$, Which)
+    Style1 = Virtual_KB(Which).Style1
+    Style2 = Virtual_KB(Which).style2
+    xsize = Virtual_KB(Which).Xsize
+    ysize = Virtual_KB(Which).Ysize
+    FOR xon = 0 TO 10
+        FOR z = 0 TO 255
+            firston = -1
+            IF Keyboard_Values(Which, xon, z).Caption = "" THEN _CONTINUE
+            IF Keyboard_Values(Which, xon, z).Caption = out$ THEN
+                IF firston = -1 THEN firston = z
+                Repeat = ASC(out$, LEN(out$))
+                IF Repeat < 1 OR Repeat > 9 THEN Repeat = 1
+                IF firston > -1 THEN
+                    d = _DEST: _DEST Virtual_KB(Which).Handle
+                    SELECT CASE Keyboard_Values(Which, xon, z).State
+                        CASE 0 'button is up
+                            IF Repeat > 1 THEN
+                                Draw_Button firston * xsize, xon * ysize, xsize * Repeat, ysize, LEFT$(Keyboard_Values(Which, xon, z).Caption, LEN(Keyboard_Values(Which, xon, z).Caption) - 1), Style1
+                            ELSE
+                                Draw_Button firston * xsize, xon * ysize, xsize * Repeat, ysize, Keyboard_Values(Which, xon, z).Caption, Style1
+                            END IF
+                        CASE -1 'button is down
+                            IF Repeat > 1 THEN
+                                Draw_Button firston * xsize, xon * ysize, xsize * Repeat, ysize, LEFT$(Keyboard_Values(Which, xon, z).Caption, LEN(Keyboard_Values(Which, xon, z).Caption) - 1), Style2
+                            ELSE
+                                Draw_Button firston * xsize, xon * ysize, xsize * Repeat, ysize, Keyboard_Values(Which, xon, z).Caption, Style2
+                            END IF
+                    END SELECT
+                    Virtual_KB(Which).Hardware_Handle = _COPYIMAGE(Virtual_KB(Which).Handle, 33)
+                    _DEST d
+                    z = z + Repeat - 1
+                END IF
+            END IF
+        NEXT
+    NEXT
+
+END SUB
+
+SUB Display_KB (Which AS INTEGER, Xwhere AS INTEGER, Ywhere AS INTEGER, style AS INTEGER)
+    STATIC Old_KB AS INTEGER
+    IF Old_KB <> Which THEN Reset_Buttons (Old_KB): Reset_Buttons (Which)
+    IF Virtual_KB(Which).In_Use = 0 THEN EXIT SUB
+    IF Virtual_KB(Which).Is_Hidden THEN EXIT SUB
+    Virtual_KB(Which).Xoffset = Xwhere
+    Virtual_KB(Which).Yoffset = Ywhere
+    IF style THEN 'we want a hardware image
+        _PUTIMAGE (Xwhere, Ywhere), Virtual_KB(Which).Hardware_Handle
+    ELSE
+        _PUTIMAGE (Xwhere, Ywhere), Virtual_KB(Which).Handle
+    END IF
+END SUB
+
+FUNCTION Create_KB (KB() AS STRING, Xsize AS LONG, Ysize AS LONG, Style1 AS INTEGER, Style2 AS INTEGER)
+    'style1 and style2 are the styles of the buttons associated with the keyboard
+
+    STATIC AS LONG D, S 'stored as static so as to not interfer with any globals of the same name.
+    D = _DEST: S = _SOURCE
+
+    FOR i = 0 TO 10
+        IF Virtual_KB(i).In_Use = 0 THEN
+            Virtual_KB(i).In_Use = -1
+            Virtual_KB(i).Xsize = Xsize
+            Virtual_KB(i).Ysize = Ysize
+            Virtual_KB(i).Style1 = Style1
+            Virtual_KB(i).style2 = Style2
+            Create_KB = i
+            EXIT FOR
+        END IF
+    NEXT
+    IF i = 11 THEN
+        CLS
+        PRINT "Too many keyboards registered in use at the same time!  Can not create a new one."
+        END
+    END IF
+    This_KB = i
+
+    keyboard_image = _NEWIMAGE(4096, 4096, 32)
+    _DEST keyboard_image: _SOURCE keyboard_image
+
+
+    'now build the keyboard
+    FOR i = 0 TO UBOUND(KB)
+        top = i * Ysize
+        count = 0
+        FOR j = 1 TO LEN(KB(i))
+            left = (count) * Xsize
+            count = count + 1
+            repeat = 1
+            c = ASC(KB(i), j): out$ = ""
+            IF c = 0 THEN
+                'look for the comma
+                comma_position = INSTR(j, KB(i), ",")
+                IF comma_position THEN 'we have a value, label
+                    value$ = MID$(KB(i), j + 1, comma_position - j - 1)
+                    c = VAL(value$)
+
+                    j = comma_position + 1
+                ELSE 'cry loud and hard so we can sort it out while programming our keyboard layout
+                    scream_and_die:
+                    SLEEP
+                    CLS
+                    PRINT "You have an invalid keyboard layout!"
+                    END
+                END IF
+
+                end_position = INSTR(j, KB(i), CHR$(0))
+                IF end_position THEN 'we're extracting the label
+                    out$ = MID$(KB(i), j, end_position - j)
+                    repeat = ASC(out$, LEN(out$))
+                    IF repeat > 0 AND repeat < 9 THEN
+                        r$ = CHR$(repeat)
+                        out$ = LEFT$(out$, LEN(out$) - 1)
+                    ELSE
+                        repeat = 1
+                    END IF
+                    Keyboard_Values(This_KB, i, count - 1).Caption = out$ + r$
+                    j = end_position
+                ELSE
+                    GOTO scream_and_die
+                END IF
+            END IF
+
+
+            IF left + Xsize * repeat > max_width THEN max_width = left + Xsize * repeat
+            IF top + Ysize > max_height THEN max_height = top + Ysize
+            IF c < 256 AND out$ = "" THEN out$ = CHR$(c)
+
+            Keyboard_Values(This_KB, i, count - 1).Caption = out$ + "r"
+            Draw_Button left, top, Xsize * repeat, Ysize, out$, Style1
+            DO UNTIL repeat = 1
+                Keyboard_Values(This_KB, i, count - 1).Value = c
+                Keyboard_Values(This_KB, i, count - 1).Caption = out$ + r$
+                count = count + 1
+                repeat = repeat - 1
+            LOOP
+            Keyboard_Values(This_KB, i, count - 1).Value = c
+            Keyboard_Values(This_KB, i, count - 1).Caption = out$ + r$
+            r$ = ""
+        NEXT
+    NEXT
+
+    'resize to proper size to put upon the screen
+    Virtual_KB(This_KB).Handle = _NEWIMAGE(max_width + 1, max_height + 1, 32)
+    _PUTIMAGE (0, 0)-(max_width, max_height), keyboard_image, Virtual_KB(This_KB).Handle, (0, 0)-(max_width, max_height)
+    Virtual_KB(This_KB).Hardware_Handle = _COPYIMAGE(Virtual_KB(This_KB).Handle, 33)
+    _FREEIMAGE keyboard_image
+
+    clean_exit:
+    _SOURCE S: _DEST D
+END FUNCTION
+
+Function Register_Button (Red AS INTEGER,Green AS INTEGER,Blue AS INTEGER,_
+                          RedMax AS INTEGER,GreenMax AS INTEGER,BlueMax AS INTEGER,Shade AS INTEGER,_
+                          Font AS INTEGER,Font_Color AS _UNSIGNED LONG,Font_Background AS _UNSIGNED LONG)
+    U = UBOUND(Button_Style)
+    FOR i = 0 TO 10
+        IF Button_Style(i).In_Use = 0 THEN EXIT FOR
+    NEXT
+    IF i > U THEN REDIM _PRESERVE Button_Style(U + 10) AS Buttons_Internal_Type
+    Button_Style(i).In_Use = -1
+    Button_Style(i).Red = Red
+    Button_Style(i).Green = Green
+    Button_Style(i).Blue = Blue
+    Button_Style(i).RedMax = RedMax
+    Button_Style(i).GreenMax = GreenMax
+    Button_Style(i).BlueMax = BlueMax
+    Button_Style(i).Shade = Shade
+    Button_Style(i).Font = Font
+    Button_Style(i).Font_Color = Font_Color
+    Button_Style(i).Font_Background = Font_Background
+    Register_Button = i
+END FUNCTION
+
+
+
+SUB Draw_Button (x, y, wide, tall, caption$, style)
+    DIM AS _UNSIGNED LONG k, d, bg
+    F = _FONT
+    d = _DEFAULTCOLOR
+    bg = _BACKGROUNDCOLOR
+    _FONT Button_Style(style).Font
+    IF Button_Style(style).Shade > 0 THEN 'if the shadowing is less than 1, then we have none.
+        rc = (Button_Style(style).RedMax - Button_Style(style).Red) / Button_Style(style).Shade
+        gc = (Button_Style(style).GreenMax - Button_Style(style).Green) / Button_Style(style).Shade
+        bc = (Button_Style(style).BlueMax - Button_Style(style).Blue) / Button_Style(style).Shade
+    END IF
+    FOR i = 0 TO Button_Style(style).Shade
+        k = _RGB32(Button_Style(style).Red + rc * i, Button_Style(style).Green + gc * i, Button_Style(style).Blue + bc * i)
+        LINE (x + i * .75, y + i)-(x + wide - i * .75, y + tall - i), k, B
+    NEXT
+    PAINT (x + i, y + i), k
+    COLOR _RGB32(r, g, b), 0
+    COLOR Button_Style(style).Font_Color, Font_Background
+    _PRINTSTRING (x + (wide - _PRINTWIDTH(caption$)) / 2, y + (tall - _FONTHEIGHT) / 2 + 2), caption$
+
+    _FONT F
+    COLOR d, bg
+END SUB
+
+$IF EXTENDEDTIMER = UNDEFINED THEN
+    $LET EXTENDEDTIMER = TRUE
+
+    FUNCTION ExtendedTimer##
+        'modified extendedtimer to store the old day's count, and not have to recalculate it every time the routine is called.
+
+        STATIC olds AS _FLOAT, old_day AS _FLOAT
+        DIM m AS INTEGER, d AS INTEGER, y AS INTEGER
+        DIM s AS _FLOAT, day AS STRING
+        IF olds = 0 THEN 'calculate the day the first time the extended timer runs
+            day = DATE$
+            m = VAL(LEFT$(day, 2))
+            d = VAL(MID$(day, 4, 2))
+            y = VAL(RIGHT$(day, 4)) - 1970
+            SELECT CASE m 'Add the number of days for each previous month passed
+                CASE 2: d = d + 31
+                CASE 3: d = d + 59
+                CASE 4: d = d + 90
+                CASE 5: d = d + 120
+                CASE 6: d = d + 151
+                CASE 7: d = d + 181
+                CASE 8: d = d + 212
+                CASE 9: d = d + 243
+                CASE 10: d = d + 273
+                CASE 11: d = d + 304
+                CASE 12: d = d + 334
+            END SELECT
+            IF (y MOD 4) = 2 AND m > 2 THEN d = d + 1 'add a day if this is leap year and we're past february
+            d = (d - 1) + 365 * y 'current month days passed + 365 days per each standard year
+            d = d + (y + 2) \ 4 'add in days for leap years passed
+            s = d * 24 * 60 * 60 'Seconds are days * 24 hours * 60 minutes * 60 seconds
+            old_day = s
+        END IF
+        IF TIMER < oldt THEN 'we went from 23:59:59 (a second before midnight) to 0:0:0 (midnight)
+            old_day = s + 83400 'add another worth of seconds to our counter
+        END IF
+        oldt = TIMER
+        olds = old_day + oldt
+        ExtendedTimer## = olds
+    END FUNCTION
+$END IF
+
