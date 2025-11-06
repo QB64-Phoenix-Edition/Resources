@@ -71,7 +71,6 @@ These are [BASIC](https://en.wikipedia.org/wiki/BASIC) ([GWBASIC](https://winwor
 | KING-KONG vs MIGHTY JOE YOUNG | A turn-based artillery game by [Bob Seguin](https://qb64phoenix.com/forum/forumdisplay.php?fid=27) |
 | Lights On | QB64 game by [Fellippe Heitor](https://github.com/FellippeHeitor) |
 | MADMIX | A Pacman clone by Enrique Huerta |
-| MakeCARR | MakeCARR & MakeDATA file embedding utilities by [Roland Heyder](https://github.com/RhoSigma-QB64) |
 | Maze | Maze of Misery by Steve M. |
 | Mini Golf | A mini golf game by [Bob Seguin](https://qb64phoenix.com/forum/forumdisplay.php?fid=27) |
 | Money | Simple money manager by [Microsoft](https://github.com/microsoft/) |
@@ -92,7 +91,6 @@ These are [BASIC](https://en.wikipedia.org/wiki/BASIC) ([GWBASIC](https://winwor
 | QB64 Menu Library | Menu routines by [Terry Ritchie](https://www.qb64tutorial.com/) |
 | QB64 Graphics Line Input Library | Line Input routines by [Terry Ritchie](https://www.qb64tutorial.com/) |
 | QB64 Sprite Library | Sprite routines by [Terry Ritchie](https://www.qb64tutorial.com/) |
-| GuiTools GUI Library | A GUI library by [Roland Heyder](https://github.com/RhoSigma-QB64) |
 | QBASCII | ASCII art drawing app by [Jeremy Munn](https://github.com/jtmunn) |
 | QBasic Beautifier | QB code beautifier by Kewbie_newbie |
 | QBasic Nventory | (i)nventory manager by [Morwic](https://github.com/morwic) |
@@ -118,7 +116,6 @@ These are [BASIC](https://en.wikipedia.org/wiki/BASIC) ([GWBASIC](https://winwor
 | Sanctum | Sanctum 3D World by [William F. Barnes](http://barnes.x10host.com/home/) |
 | SaveImage | Screen capture library by [Steve McNeill](https://github.com/SteveMcNeill) |
 | Schemat | Schematic Design Program by Leif J. Burrow |
-| ScreenBlankers | Simple screen blankers (savers) by [Roland Heyder](https://github.com/RhoSigma-QB64) |
 | Set Fire To The Rain | QB64 game by [Fellippe Heitor](https://github.com/FellippeHeitor) |
 | Shooter | QB64 shooter demo game by unknown |
 | Snake | Snake clone by [Tim Baxendale](https://github.com/pcluddite) |
